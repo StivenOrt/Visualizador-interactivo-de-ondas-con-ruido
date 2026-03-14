@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-from matplotlib.widgets import Slider, CheckButtons, RadioButtons, Button
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import matplotlib.axes
+    import matplotlib.figure
 
 INIT = {
     'amplitud': 1.0,
@@ -48,14 +53,28 @@ def calcular_snr(senal, ruido):
 
 
 class VisualizadorOndas:
-    def __init__(self, root):
+    def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title('Visualizador de Ondas Electromagnéticas')
         self.root.configure(bg='#1a1a2e')
 
-        self.params = dict(INIT)
-        self.tipo_onda = 'Senoidal'
-        self.tipo_ruido = 'Gaussiano'
+        self.params: dict = dict(INIT)
+        self.tipo_onda: str = 'Senoidal'
+        self.tipo_ruido: str = 'Gaussiano'
+
+        self.fig: matplotlib.figure.Figure
+        self.ax: matplotlib.axes.Axes
+        self.canvas: FigureCanvasTkAgg
+        self.lbl_periodo: tk.Label
+        self.lbl_snr: tk.Label
+        self.var_amplitud: tk.DoubleVar
+        self.var_frecuencia: tk.DoubleVar
+        self.var_fase: tk.DoubleVar
+        self.var_muestras: tk.DoubleVar
+        self.var_ruido: tk.DoubleVar
+        self.var_ruido_activo: tk.BooleanVar
+        self.var_tipo_onda: tk.StringVar
+        self.var_tipo_ruido: tk.StringVar
 
         self._build_ui()
         self._actualizar_grafica()
@@ -77,9 +96,34 @@ class VisualizadorOndas:
         self.canvas = FigureCanvasTkAgg(self.fig, master=frame_graph)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
-        frame_ctrl = tk.Frame(self.root, bg='#16213e', relief='flat')
-        frame_ctrl.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
+        frame_ctrl_outer = tk.Frame(self.root, bg='#16213e', relief='flat')
+        frame_ctrl_outer.grid(row=0, column=1, sticky='nsew', padx=(5, 10), pady=10)
+        frame_ctrl_outer.rowconfigure(0, weight=1)
+        frame_ctrl_outer.columnconfigure(0, weight=1)
+
+        ctrl_canvas = tk.Canvas(frame_ctrl_outer, bg='#16213e', highlightthickness=0)
+        ctrl_canvas.grid(row=0, column=0, sticky='nsew')
+
+        scrollbar = ttk.Scrollbar(frame_ctrl_outer, orient='vertical', command=ctrl_canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky='ns')
+        ctrl_canvas.configure(yscrollcommand=scrollbar.set)
+
+        frame_ctrl = tk.Frame(ctrl_canvas, bg='#16213e')
         frame_ctrl.columnconfigure(0, weight=1)
+
+        ctrl_window = ctrl_canvas.create_window((0, 0), window=frame_ctrl, anchor='nw')
+
+        def _on_canvas_resize(event):
+            ctrl_canvas.itemconfig(ctrl_window, width=event.width)
+        ctrl_canvas.bind('<Configure>', _on_canvas_resize)
+
+        def _on_frame_resize(event):
+            ctrl_canvas.configure(scrollregion=ctrl_canvas.bbox('all'))
+        frame_ctrl.bind('<Configure>', _on_frame_resize)
+
+        def _on_mousewheel(event):
+            ctrl_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
+        ctrl_canvas.bind_all('<MouseWheel>', _on_mousewheel)
 
         self._build_controls(frame_ctrl)
 
@@ -99,12 +143,12 @@ class VisualizadorOndas:
         var = tk.DoubleVar(value=init)
         setattr(self, f'var_{var_name}', var)
 
-        val_lbl = tk.Label(frame, textvariable=var, bg='#16213e', fg='#63b3ed',
-                           font=('Consolas', 10), width=6, anchor='e')
-        val_lbl.grid(row=0, column=1, padx=(4, 0))
+        _ = tk.Label(frame, textvariable=var, bg='#16213e', fg='#63b3ed',
+                    font=('Consolas', 10), width=6, anchor='e')
+        _.grid(row=0, column=1, padx=(4, 0))
 
         slider = ttk.Scale(frame, from_=from_, to=to, orient='horizontal',
-                           variable=var, command=lambda e: self._on_change())
+                           variable=var, command=lambda _: self._on_change())
         slider.grid(row=0, column=0, sticky='ew')
         slider.configure(style='Custom.Horizontal.TScale')
 
@@ -217,16 +261,16 @@ class VisualizadorOndas:
                                 padx=8, pady=5)
         btn_guardar.grid(row=row, column=0, sticky='ew', padx=12, pady=(0, 12))
 
-    def _on_change(self, *args):
+    def _on_change(self):
         self._actualizar_grafica()
 
-    def _reset(self):
-        self.var_amplitud.set(INIT['amplitud'])
-        self.var_frecuencia.set(INIT['frecuencia'])
-        self.var_fase.set(INIT['fase'])
-        self.var_muestras.set(INIT['muestras'])
-        self.var_ruido.set(INIT['ruido_std'])
-        self.var_ruido_activo.set(INIT['ruido_activo'])
+    def _reset(self) -> None:
+        self.var_amplitud.set(float(INIT['amplitud']))
+        self.var_frecuencia.set(float(INIT['frecuencia']))
+        self.var_fase.set(float(INIT['fase']))
+        self.var_muestras.set(float(INIT['muestras']))
+        self.var_ruido.set(float(INIT['ruido_std']))
+        self.var_ruido_activo.set(bool(INIT['ruido_activo']))
         self.var_tipo_onda.set('Senoidal')
         self.var_tipo_ruido.set('Gaussiano')
         self._actualizar_grafica()
@@ -241,17 +285,17 @@ class VisualizadorOndas:
             self.fig.savefig(ruta, dpi=150, bbox_inches='tight', facecolor=self.fig.get_facecolor())
             messagebox.showinfo('Guardado', f'Imagen guardada en:\n{ruta}')
 
-    def _actualizar_grafica(self):
-        amp = round(self.var_amplitud.get(), 2)
-        freq = round(self.var_frecuencia.get(), 2)
-        fase = round(self.var_fase.get(), 3)
+    def _actualizar_grafica(self) -> None:
+        amp = float(round(self.var_amplitud.get(), 2))
+        freq = float(round(self.var_frecuencia.get(), 2))
+        fase = float(round(self.var_fase.get(), 3))
         muestras = int(self.var_muestras.get())
-        ruido_std = round(self.var_ruido.get(), 3)
+        ruido_std = float(round(self.var_ruido.get(), 3))
         ruido_activo = self.var_ruido_activo.get()
         tipo_onda = self.var_tipo_onda.get()
         tipo_ruido = self.var_tipo_ruido.get()
 
-        periodo = round(1 / freq, 4) if freq > 0 else 0
+        periodo = float(round(1 / freq, 4)) if freq > 0 else 0.0
         self.lbl_periodo.config(text=f'{periodo} s')
 
         t = np.linspace(0, INIT['t_max'], muestras)
